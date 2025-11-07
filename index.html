@@ -1,596 +1,6 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gestión de Suplencias Médicas</title>
-    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body>
-    <div id="root"></div>
-    <script type="text/babel">
-        const { useState, useEffect } = React;
-        
-        const SUPABASE_URL = 'https://gicgkdowyexgxzremnpf.supabase.co';
-        const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdpY2drZG93eWV4Z3h6cmVtbnBmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjIzMDA2NTEsImV4cCI6MjA3Nzg3NjY1MX0.PNB97KW8rqjKU3SK8sN3RWFqKRMFSfk1q6hIlr0qkF4';
-
-        const supabase = {
-          async insert(table, data) {
-            const response = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
-              method: 'POST',
-              headers: {'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=representation'},
-              body: JSON.stringify(data)
-            });
-            return await response.json();
-          },
-          async select(table) {
-            const response = await fetch(`${SUPABASE_URL}/rest/v1/${table}?order=timestamp.desc`, {
-              headers: {'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`}
-            });
-            return await response.json();
-          },
-          async delete(table, id) {
-            const response = await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.${id}`, {
-              method: 'DELETE',
-              headers: {'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`}
-            });
-            return response.ok;
-          }
-        };
-
-        const TURNOS = ['Matutino', 'Vespertino', 'Nocturno', 'Fin de Semana'];
-
-        function App() {
-          const [view, setView] = useState('registro');
-          const [suplencias, setSuplencias] = useState([]);
-          const [misSuplencias, setMisSuplencias] = useState([]);
-          const [loading, setLoading] = useState(false);
-          
-          // Datos del usuario
-          const [nombreMedico, setNombreMedico] = useState('');
-          const [mostrarConfig, setMostrarConfig] = useState(false);
-          const [perfilOk, setPerfilOk] = useState(false);
-          
-          // Admin
-          const [esAdmin, setEsAdmin] = useState(false);
-          const [pin, setPin] = useState('');
-          const [pinGuardado, setPinGuardado] = useState('');
-          const [pinPrompt, setPinPrompt] = useState(false);
-          const [pinInput, setPinInput] = useState('');
-          
-          // Formulario de suplencia
-          const [fechaSolicitud, setFechaSolicitud] = useState('');
-          const [fechaSuplencia, setFechaSuplencia] = useState('');
-          const [turnoTitular, setTurnoTitular] = useState('Matutino');
-          const [medicoSuplente, setMedicoSuplente] = useState('');
-          const [turnoSuplente, setTurnoSuplente] = useState('Matutino');
-          const [notas, setNotas] = useState('');
-          
-          // Filtros
-          const [filtroMes, setFiltroMes] = useState('');
-          const [filtroMedico, setFiltroMedico] = useState('');
-          const [filtroTurno, setFiltroTurno] = useState('');
-
-          useEffect(() => {
-            const datos = {
-              nombre: localStorage.getItem('nombreMedicoSup') || '',
-              esAdmin: localStorage.getItem('esAdminSup') === 'true',
-              pin: localStorage.getItem('pinAdminSup') || ''
-            };
-            
-            if (datos.nombre) {
-              setNombreMedico(datos.nombre);
-              setEsAdmin(datos.esAdmin);
-              setPinGuardado(datos.pin);
-              setPerfilOk(true);
-              cargarMisSuplencias(datos.nombre);
-            } else {
-              setMostrarConfig(true);
-            }
-
-            // Fecha de hoy por defecto
-            const hoy = new Date().toISOString().split('T')[0];
-            setFechaSolicitud(hoy);
-            setFechaSuplencia(hoy);
-          }, []);
-
-          const guardarPerfil = () => {
-            if (!nombreMedico.trim()) return alert('⚠️ Ingresa tu nombre');
-            if (esAdmin && !pin) return alert('⚠️ Configura un PIN');
-            
-            localStorage.setItem('nombreMedicoSup', nombreMedico);
-            localStorage.setItem('esAdminSup', esAdmin.toString());
-            if (esAdmin) {
-              localStorage.setItem('pinAdminSup', pin);
-              setPinGuardado(pin);
-            }
-            setPerfilOk(true);
-            setMostrarConfig(false);
-            cargarMisSuplencias(nombreMedico);
-            alert('✅ Perfil guardado');
-          };
-
-          const cargarMisSuplencias = async (nombre) => {
-            try {
-              const todas = await supabase.select('suplencias');
-              setMisSuplencias(todas.filter(s => s.medico_titular === nombre || s.medico_suplente === nombre));
-            } catch (e) {
-              console.error(e);
-            }
-          };
-
-          const cargarTodasSuplencias = async () => {
-            setLoading(true);
-            try {
-              const todas = await supabase.select('suplencias');
-              setSuplencias(todas);
-            } catch (e) {
-              alert('⚠️ Error al cargar suplencias');
-            }
-            setLoading(false);
-          };
-
-          const registrarSuplencia = async () => {
-            if (!perfilOk) {
-              setMostrarConfig(true);
-              return alert('⚠️ Configura tu perfil primero');
-            }
-
-            if (!fechaSolicitud || !fechaSuplencia || !medicoSuplente.trim()) {
-              return alert('⚠️ Completa todos los campos obligatorios');
-            }
-
-            const suplencia = {
-              id: Date.now(),
-              fecha_solicitud: fechaSolicitud,
-              fecha_suplencia: fechaSuplencia,
-              medico_titular: nombreMedico,
-              turno_titular: turnoTitular,
-              medico_suplente: medicoSuplente.trim(),
-              turno_suplente: turnoSuplente,
-              estado: 'Activa',
-              notas: notas.trim() || null,
-              timestamp: Date.now()
-            };
-
-            try {
-              await supabase.insert('suplencias', suplencia);
-              alert('✅ Suplencia registrada correctamente');
-              
-              // Limpiar formulario
-              setMedicoSuplente('');
-              setNotas('');
-              const hoy = new Date().toISOString().split('T')[0];
-              setFechaSolicitud(hoy);
-              setFechaSuplencia(hoy);
-              
-              // Recargar
-              cargarMisSuplencias(nombreMedico);
-            } catch (e) {
-              alert('⚠️ Error al registrar suplencia');
-            }
-          };
-
-          const eliminarSuplencia = async (id) => {
-            if (!confirm('¿Eliminar esta suplencia?')) return;
-            
-            try {
-              await supabase.delete('suplencias', id);
-              alert('✅ Suplencia eliminada');
-              cargarTodasSuplencias();
-            } catch (e) {
-              alert('⚠️ Error al eliminar');
-            }
-          };
-
-          const exportarExcel = () => {
-            const lista = filtrarSuplencias();
-            if (!lista.length) return alert('⚠️ No hay suplencias para exportar');
-
-            let csv = 'Fecha Solicitud,Fecha Suplencia,Titular,Turno Titular,Suplente,Turno Suplente,Estado,Notas\n';
-            lista.forEach(s => {
-              csv += `"${s.fecha_solicitud}","${s.fecha_suplencia}","${s.medico_titular}","${s.turno_titular}","${s.medico_suplente}","${s.turno_suplente}","${s.estado}","${s.notas||''}"\n`;
-            });
-
-            const blob = new Blob([csv], {type: 'text/csv'});
-            const link = document.createElement('a');
-            link.href = URL.createObjectURL(blob);
-            link.download = `suplencias_${Date.now()}.csv`;
-            link.click();
-          };
-
-          const generarReporte = () => {
-            const lista = filtrarSuplencias();
-            if (!lista.length) return alert('⚠️ No hay datos para el reporte');
-
-            const medicosStats = {};
-            const turnosStats = {};
-
-            lista.forEach(s => {
-              // Stats por médico
-              if (!medicosStats[s.medico_titular]) {
-                medicosStats[s.medico_titular] = {solicitadas: 0, cubiertas: 0};
-              }
-              if (!medicosStats[s.medico_suplente]) {
-                medicosStats[s.medico_suplente] = {solicitadas: 0, cubiertas: 0};
-              }
-              
-              medicosStats[s.medico_titular].solicitadas++;
-              medicosStats[s.medico_suplente].cubiertas++;
-
-              // Stats por turno
-              turnosStats[s.turno_titular] = (turnosStats[s.turno_titular] || 0) + 1;
-            });
-
-            let reporte = '═══════════════════════════════════════\n';
-            reporte += '    REPORTE DE SUPLENCIAS MÉDICAS\n';
-            reporte += '═══════════════════════════════════════\n\n';
-            reporte += `Total de suplencias: ${lista.length}\n`;
-            reporte += `Médicos involucrados: ${Object.keys(medicosStats).length}\n\n`;
-            
-            reporte += '--- ESTADÍSTICAS POR MÉDICO ---\n\n';
-            Object.entries(medicosStats).sort((a,b) => (b[1].solicitadas + b[1].cubiertas) - (a[1].solicitadas + a[1].cubiertas)).forEach(([medico, stats]) => {
-              reporte += `${medico}:\n`;
-              reporte += `  • Suplencias solicitadas: ${stats.solicitadas}\n`;
-              reporte += `  • Suplencias cubiertas: ${stats.cubiertas}\n`;
-              reporte += `  • Total: ${stats.solicitadas + stats.cubiertas}\n\n`;
-            });
-
-            reporte += '--- ESTADÍSTICAS POR TURNO ---\n\n';
-            Object.entries(turnosStats).forEach(([turno, count]) => {
-              reporte += `${turno}: ${count} suplencias\n`;
-            });
-
-            const blob = new Blob([reporte], {type: 'text/plain'});
-            const link = document.createElement('a');
-            link.href = URL.createObjectURL(blob);
-            link.download = `reporte_suplencias_${Date.now()}.txt`;
-            link.click();
-          };
-
-          const filtrarSuplencias = () => {
-            let lista = view === 'admin' ? suplencias : misSuplencias;
-
-            if (filtroMes) {
-              lista = lista.filter(s => s.fecha_suplencia.startsWith(filtroMes));
-            }
-            if (filtroMedico) {
-              lista = lista.filter(s => 
-                s.medico_titular.toLowerCase().includes(filtroMedico.toLowerCase()) ||
-                s.medico_suplente.toLowerCase().includes(filtroMedico.toLowerCase())
-              );
-            }
-            if (filtroTurno) {
-              lista = lista.filter(s => s.turno_titular === filtroTurno || s.turno_suplente === filtroTurno);
-            }
-
-            return lista;
-          };
-
-          const calcularEstadisticas = (lista) => {
-            const medicosStats = {};
-            const turnosStats = {};
-
-            lista.forEach(s => {
-              if (!medicosStats[s.medico_titular]) {
-                medicosStats[s.medico_titular] = {solicitadas: 0, cubiertas: 0};
-              }
-              if (!medicosStats[s.medico_suplente]) {
-                medicosStats[s.medico_suplente] = {solicitadas: 0, cubiertas: 0};
-              }
-              
-              medicosStats[s.medico_titular].solicitadas++;
-              medicosStats[s.medico_suplente].cubiertas++;
-
-              turnosStats[s.turno_titular] = (turnosStats[s.turno_titular] || 0) + 1;
-            });
-
-            return { medicosStats, turnosStats };
-          };
-
-          if (pinPrompt) {
-            return (
-              <div className="min-h-screen bg-gradient-to-br from-purple-50 to-purple-100 p-4 flex items-center justify-center">
-                <div className="bg-white rounded-xl shadow-2xl p-8 max-w-md w-full">
-                  <h2 className="text-2xl font-bold text-center mb-4">🔒 PIN Administrador</h2>
-                  <input
-                    type="password"
-                    value={pinInput}
-                    onChange={(e) => setPinInput(e.target.value)}
-                    placeholder="••••"
-                    className="w-full p-4 text-center text-2xl border-2 rounded-lg mb-4"
-                    maxLength="4"
-                    onKeyPress={(e) => {
-                      if (e.key === 'Enter') {
-                        if (pinInput === pinGuardado) {
-                          setView('admin');
-                          cargarTodasSuplencias();
-                          setPinPrompt(false);
-                          setPinInput('');
-                        } else {
-                          alert('❌ PIN incorrecto');
-                          setPinInput('');
-                        }
-                      }
-                    }}
-                  />
-                  <button
-                    onClick={() => {
-                      if (pinInput === pinGuardado) {
-                        setView('admin');
-                        cargarTodasSuplencias();
-                        setPinPrompt(false);
-                        setPinInput('');
-                      } else {
-                        alert('❌ PIN incorrecto');
-                        setPinInput('');
-                      }
-                    }}
-                    className="w-full bg-purple-500 text-white py-3 rounded-lg font-bold mb-2"
-                  >
-                    Verificar
-                  </button>
-                  <button
-                    onClick={() => {setPinPrompt(false); setPinInput('');}}
-                    className="w-full bg-gray-200 py-2 rounded-lg"
-                  >
-                    Cancelar
-                  </button>
-                </div>
-              </div>
-            );
-          }
-
-          if (mostrarConfig) {
-            return (
-              <div className="min-h-screen bg-gradient-to-br from-purple-50 to-purple-100 p-4 flex items-center justify-center">
-                <div className="bg-white rounded-xl shadow-2xl p-8 max-w-md w-full">
-                  <h2 className="text-2xl font-bold text-center mb-6">👨‍⚕️ Configurar Perfil</h2>
-                  <div className="space-y-4">
-                    <div>
-                      <label className="block text-sm font-bold mb-2">Nombre Completo *</label>
-                      <input 
-                        type="text" 
-                        value={nombreMedico} 
-                        onChange={(e) => setNombreMedico(e.target.value)} 
-                        placeholder="Dr. Juan Pérez" 
-                        className="w-full p-3 border-2 rounded-lg" 
-                      />
-                    </div>
-                    
-                    <div className="border-t pt-4">
-                      <label className="flex items-center gap-2">
-                        <input 
-                          type="checkbox" 
-                          checked={esAdmin} 
-                          onChange={(e) => setEsAdmin(e.target.checked)} 
-                          className="w-5 h-5" 
-                        />
-                        <span className="font-bold">Soy administrador 🛡️</span>
-                      </label>
-                    </div>
-                    
-                    {esAdmin && (
-                      <div className="bg-purple-50 border-2 border-purple-300 rounded-lg p-4">
-                        <label className="block text-sm font-bold mb-2">PIN (4 dígitos) *</label>
-                        <input 
-                          type="password" 
-                          value={pin} 
-                          onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 4))} 
-                          placeholder="••••" 
-                          maxLength="4" 
-                          className="w-full p-3 text-center text-xl border-2 rounded-lg" 
-                        />
-                      </div>
-                    )}
-                    
-                    <button 
-                      onClick={guardarPerfil} 
-                      className="w-full bg-purple-500 text-white py-3 rounded-lg font-bold"
-                    >
-                      Guardar
-                    </button>
-                    
-                    {perfilOk && (
-                      <button 
-                        onClick={() => setMostrarConfig(false)} 
-                        className="w-full bg-gray-200 py-2 rounded-lg"
-                      >
-                        Cancelar
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            );
-          }
-
-          return (
-            <div className="min-h-screen bg-gradient-to-br from-purple-50 to-purple-100 p-4">
-              <div className="max-w-6xl mx-auto">
-                {/* Header */}
-                <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <h1 className="text-2xl font-bold text-purple-900">🏥 Gestión de Suplencias</h1>
-                      <p className="text-gray-600">
-                        Dr(a). {nombreMedico}
-                        {esAdmin && <span className="ml-2 bg-purple-400 text-white px-2 py-0.5 rounded text-xs font-bold">ADMIN</span>}
-                      </p>
-                      <p className="text-xs text-green-600 font-bold">🔗 Conectado a Supabase</p>
-                    </div>
-                    <button onClick={() => setMostrarConfig(true)} className="bg-gray-100 p-3 rounded-lg">⚙️</button>
-                  </div>
-                </div>
-
-                {/* Menú */}
-                <div className="bg-white rounded-xl shadow-lg p-4 mb-6">
-                  <div className={`grid ${esAdmin ? 'grid-cols-4' : 'grid-cols-3'} gap-3`}>
-                    <button
-                      onClick={() => setView('registro')}
-                      className={`p-4 rounded-lg font-bold ${view === 'registro' ? 'bg-purple-500 text-white' : 'bg-gray-100'}`}
-                    >
-                      ➕ Nueva Suplencia
-                    </button>
-                    <button
-                      onClick={() => setView('mis-suplencias')}
-                      className={`p-4 rounded-lg font-bold ${view === 'mis-suplencias' ? 'bg-purple-500 text-white' : 'bg-gray-100'}`}
-                    >
-                      📋 Mis Suplencias
-                    </button>
-                    <button
-                      onClick={() => setView('estadisticas')}
-                      className={`p-4 rounded-lg font-bold ${view === 'estadisticas' ? 'bg-purple-500 text-white' : 'bg-gray-100'}`}
-                    >
-                      📊 Estadísticas
-                    </button>
-                    {esAdmin && (
-                      <button
-                        onClick={() => setPinPrompt(true)}
-                        className={`p-4 rounded-lg font-bold ${view === 'admin' ? 'bg-yellow-500 text-white' : 'bg-yellow-100'}`}
-                      >
-                        🛡️ Admin
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {/* Vista: Registro */}
-                {view === 'registro' && (
-                  <div className="bg-white rounded-xl shadow-lg p-6">
-                    <h2 className="text-2xl font-bold mb-6">➕ Registrar Nueva Suplencia</h2>
-                    
-                    <div className="grid md:grid-cols-2 gap-6">
-                      <div>
-                        <h3 className="font-bold text-lg mb-4 text-purple-700">📅 Fechas</h3>
-                        <div className="space-y-4">
-                          <div>
-                            <label className="block text-sm font-bold mb-2">Fecha de Solicitud *</label>
-                            <input
-                              type="date"
-                              value={fechaSolicitud}
-                              onChange={(e) => setFechaSolicitud(e.target.value)}
-                              className="w-full p-3 border-2 rounded-lg"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-sm font-bold mb-2">Fecha de la Suplencia *</label>
-                            <input
-                              type="date"
-                              value={fechaSuplencia}
-                              onChange={(e) => setFechaSuplencia(e.target.value)}
-                              className="w-full p-3 border-2 rounded-lg"
-                            />
-                          </div>
-                        </div>
-                      </div>
-
-                      <div>
-                        <h3 className="font-bold text-lg mb-4 text-purple-700">👨‍⚕️ Médico Titular</h3>
-                        <div className="space-y-4">
-                          <div>
-                            <label className="block text-sm font-bold mb-2">Nombre (Tú)</label>
-                            <input
-                              type="text"
-                              value={nombreMedico}
-                              disabled
-                              className="w-full p-3 border-2 rounded-lg bg-gray-100"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-sm font-bold mb-2">Turno del Titular *</label>
-                            <select
-                              value={turnoTitular}
-                              onChange={(e) => setTurnoTitular(e.target.value)}
-                              className="w-full p-3 border-2 rounded-lg"
-                            >
-                              {TURNOS.map(t => <option key={t} value={t}>{t}</option>)}
-                            </select>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div>
-                        <h3 className="font-bold text-lg mb-4 text-green-700">👤 Médico Suplente</h3>
-                        <div className="space-y-4">
-                          <div>
-                            <label className="block text-sm font-bold mb-2">Nombre del Suplente *</label>
-                            <input
-                              type="text"
-                              value={medicoSuplente}
-                              onChange={(e) => setMedicoSuplente(e.target.value)}
-                              placeholder="Dr. María García"
-                              className="w-full p-3 border-2 rounded-lg"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-sm font-bold mb-2">Turno del Suplente *</label>
-                            <select
-                              value={turnoSuplente}
-                              onChange={(e) => setTurnoSuplente(e.target.value)}
-                              className="w-full p-3 border-2 rounded-lg"
-                            >
-                              {TURNOS.map(t => <option key={t} value={t}>{t}</option>)}
-                            </select>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div>
-                        <h3 className="font-bold text-lg mb-4 text-gray-700">📝 Notas (opcional)</h3>
-                        <textarea
-                          value={notas}
-                          onChange={(e) => setNotas(e.target.value)}
-                          placeholder="Información adicional..."
-                          className="w-full p-3 border-2 rounded-lg h-32"
-                        />
-                      </div>
-                    </div>
-
-                    <button
-                      onClick={registrarSuplencia}
-                      className="w-full mt-6 bg-purple-500 text-white py-4 rounded-lg font-bold text-lg hover:bg-purple-600"
-                    >
-                      ✅ Registrar Suplencia
-                    </button>
-                  </div>
-                )}
-
-                {/* Vista: Mis Suplencias */}
-                {view === 'mis-suplencias' && (
-                  <div className="bg-white rounded-xl shadow-lg p-6">
-                    <h2 className="text-2xl font-bold mb-4">📋 Mis Suplencias</h2>
-                    
-                    {misSuplencias.length === 0 ? (
-                      <div className="text-center py-12 text-gray-500">
-                        <p>No tienes suplencias registradas</p>
-                      </div>
-                    ) : (
-                      <div className="space-y-3">
-                        {misSuplencias.map(s => (
-                          <div key={s.id} className="border-2 rounded-lg p-4 hover:border-purple-300">
-                            <div className="flex justify-between items-start mb-2">
-                              <div>
-                                <span className={`text-xs px-2 py-1 rounded ${
-                                  s.medico_titular === nombreMedico ? 'bg-purple-100 text-purple-700' : 'bg-green-100 text-green-700'
-                                }`}>
-                                  {s.medico_titular === nombreMedico ? 'Solicitada por ti' : 'Cubriendo'}
-                                </span>
-                                <h3 className="font-bold mt-2">
-                                  {s.medico_titular === nombreMedico ? `Suplente: ${s.medico_suplente}` : `Titular: ${s.medico_titular}`}
-                                </h3>
-                              </div>
-                              <span className="bg-green-100 text-green-700 px-2 py-1 rounded text-xs font-bold">
-                                {s.estado}
-                              </span>
-                            </div>
-                            <div className="text-sm text-gray-600 space-y-1">
-                              <p>📅 Fecha suplencia: <strong>{new Date(s.fecha_suplencia).toLocaleDateString('es-MX')}</strong></p>
-                              <p>🕐 Turno titular: {s.turno_titular} • Turno suplente: {s.turno_suplente}</p>
-                              {s.notas && <p>📝 {s.notas}</p>}
+>{new Date(s.fecha_suplencia).toLocaleDateString('es-MX', {year: 'numeric', month: 'long', day: 'numeric'})}</strong></p>
+                              <p>🕐 Turno titular: <strong>{s.turno_titular}</strong> • Turno suplente: <strong>{s.turno_suplente}</strong></p>
+                              {s.notas && <p className="bg-gray-50 p-2 rounded mt-2">📝 {s.notas}</p>}
                             </div>
                           </div>
                         ))}
@@ -599,7 +9,6 @@
                   </div>
                 )}
 
-                {/* Vista: Estadísticas */}
                 {view === 'estadisticas' && (
                   <div className="bg-white rounded-xl shadow-lg p-6">
                     <h2 className="text-2xl font-bold mb-4">📊 Mis Estadísticas</h2>
@@ -611,29 +20,29 @@
                     ) : (
                       <div className="space-y-6">
                         <div className="grid grid-cols-2 gap-4">
-                          <div className="bg-purple-50 rounded-lg p-4">
-                            <p className="text-sm text-gray-600">Suplencias Solicitadas</p>
-                            <p className="text-3xl font-bold text-purple-600">
+                          <div className="bg-purple-50 rounded-lg p-4 border-2 border-purple-200">
+                            <p className="text-sm text-gray-600 mb-1">Suplencias Solicitadas</p>
+                            <p className="text-4xl font-bold text-purple-600">
                               {misSuplencias.filter(s => s.medico_titular === nombreMedico).length}
                             </p>
                           </div>
-                          <div className="bg-green-50 rounded-lg p-4">
-                            <p className="text-sm text-gray-600">Suplencias Cubiertas</p>
-                            <p className="text-3xl font-bold text-green-600">
+                          <div className="bg-green-50 rounded-lg p-4 border-2 border-green-200">
+                            <p className="text-sm text-gray-600 mb-1">Suplencias Cubiertas</p>
+                            <p className="text-4xl font-bold text-green-600">
                               {misSuplencias.filter(s => s.medico_suplente === nombreMedico).length}
                             </p>
                           </div>
                         </div>
 
                         <div className="border-t pt-4">
-                          <h3 className="font-bold mb-3">Detalle de mis suplencias solicitadas:</h3>
+                          <h3 className="font-bold mb-3 text-lg">Detalle de mis suplencias solicitadas:</h3>
                           {misSuplencias.filter(s => s.medico_titular === nombreMedico).length === 0 ? (
-<p className="text-gray-500">No has solicitado suplencias</p>
+                            <p className="text-gray-500">No has solicitado suplencias</p>
                           ) : (
                             <div className="space-y-2">
                               {misSuplencias.filter(s => s.medico_titular === nombreMedico).map(s => (
-                                <div key={s.id} className="bg-purple-50 rounded p-3 text-sm">
-                                  <p><strong>{new Date(s.fecha_suplencia).toLocaleDateString('es-MX')}</strong> • {s.turno_titular}</p>
+                                <div key={s.id} className="bg-purple-50 rounded p-3 text-sm border border-purple-200">
+                                  <p className="font-bold">{new Date(s.fecha_suplencia).toLocaleDateString('es-MX')} • {s.turno_titular}</p>
                                   <p className="text-gray-600">Cubierta por: {s.medico_suplente}</p>
                                 </div>
                               ))}
@@ -642,14 +51,14 @@
                         </div>
 
                         <div className="border-t pt-4">
-                          <h3 className="font-bold mb-3">Detalle de suplencias que he cubierto:</h3>
+                          <h3 className="font-bold mb-3 text-lg">Detalle de suplencias que he cubierto:</h3>
                           {misSuplencias.filter(s => s.medico_suplente === nombreMedico).length === 0 ? (
                             <p className="text-gray-500">No has cubierto suplencias</p>
                           ) : (
                             <div className="space-y-2">
                               {misSuplencias.filter(s => s.medico_suplente === nombreMedico).map(s => (
-                                <div key={s.id} className="bg-green-50 rounded p-3 text-sm">
-                                  <p><strong>{new Date(s.fecha_suplencia).toLocaleDateString('es-MX')}</strong> • {s.turno_suplente}</p>
+                                <div key={s.id} className="bg-green-50 rounded p-3 text-sm border border-green-200">
+                                  <p className="font-bold">{new Date(s.fecha_suplencia).toLocaleDateString('es-MX')} • {s.turno_suplente}</p>
                                   <p className="text-gray-600">Para: {s.medico_titular}</p>
                                 </div>
                               ))}
@@ -661,7 +70,6 @@
                   </div>
                 )}
 
-                {/* Vista: Admin */}
                 {view === 'admin' && (
                   <div className="bg-white rounded-xl shadow-lg p-6">
                     <div className="flex justify-between items-center mb-6">
@@ -669,13 +77,12 @@
                       <button 
                         onClick={cargarTodasSuplencias} 
                         disabled={loading}
-                        className="bg-purple-500 text-white px-4 py-2 rounded-lg font-bold"
+                        className="bg-purple-500 text-white px-4 py-2 rounded-lg font-bold hover:bg-purple-600 disabled:bg-gray-400 transition"
                       >
-                        {loading ? '⏳' : '🔄'} Actualizar
+                        {loading ? '⏳ Cargando...' : '🔄 Actualizar'}
                       </button>
                     </div>
 
-                    {/* Filtros */}
                     <div className="bg-gray-50 rounded-lg p-4 mb-6">
                       <h3 className="font-bold mb-3">🔍 Filtros</h3>
                       <div className="grid md:grid-cols-3 gap-4">
@@ -712,128 +119,130 @@
                       </div>
                       <button
                         onClick={() => {setFiltroMes(''); setFiltroMedico(''); setFiltroTurno('');}}
-                        className="mt-3 text-sm text-purple-600 font-bold"
+                        className="mt-3 text-sm text-purple-600 font-bold hover:text-purple-800"
                       >
                         Limpiar filtros
                       </button>
                     </div>
 
-                    {/* Estadísticas generales */}
-                    {suplencias.length > 0 && (
-                      <div className="bg-gradient-to-r from-purple-50 to-pink-50 rounded-lg p-6 mb-6">
-                        <h3 className="font-bold text-lg mb-4">📈 Estadísticas Generales</h3>
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-                          <div className="bg-white rounded-lg p-3">
-                            <p className="text-xs text-gray-600">Total Suplencias</p>
-                            <p className="text-2xl font-bold text-purple-600">{filtrarSuplencias().length}</p>
-                          </div>
-                          <div className="bg-white rounded-lg p-3">
-                            <p className="text-xs text-gray-600">Médicos Involucrados</p>
-                            <p className="text-2xl font-bold text-blue-600">
-                              {new Set([...filtrarSuplencias().map(s => s.medico_titular), ...filtrarSuplencias().map(s => s.medico_suplente)]).size}
-                            </p>
-                          </div>
-                          <div className="bg-white rounded-lg p-3">
-                            <p className="text-xs text-gray-600">Este Mes</p>
-                            <p className="text-2xl font-bold text-green-600">
-                              {filtrarSuplencias().filter(s => s.fecha_suplencia.startsWith(new Date().toISOString().slice(0,7))).length}
-                            </p>
-                          </div>
-                          <div className="bg-white rounded-lg p-3">
-                            <p className="text-xs text-gray-600">Activas</p>
-                            <p className="text-2xl font-bold text-orange-600">
-                              {filtrarSuplencias().filter(s => s.estado === 'Activa').length}
-                            </p>
-                          </div>
-                        </div>
-
-                        <div className="flex gap-3">
-                          <button
-                            onClick={exportarExcel}
-                            className="flex-1 bg-green-500 text-white py-2 rounded-lg font-bold"
-                          >
-                            📥 Exportar Excel
-                          </button>
-                          <button
-                            onClick={generarReporte}
-                            className="flex-1 bg-blue-500 text-white py-2 rounded-lg font-bold"
-                          >
-                            📊 Generar Reporte
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Top médicos */}
-                    {suplencias.length > 0 && (
-                      <div className="mb-6">
-                        <h3 className="font-bold text-lg mb-3">🏆 Top Médicos</h3>
-                        <div className="space-y-2">
-                          {Object.entries(calcularEstadisticas(filtrarSuplencias()).medicosStats)
-                            .sort((a,b) => (b[1].solicitadas + b[1].cubiertas) - (a[1].solicitadas + a[1].cubiertas))
-                            .slice(0, 10)
-                            .map(([medico, stats]) => (
-                              <div key={medico} className="bg-gray-50 rounded-lg p-3 flex justify-between items-center">
-                                <span className="font-bold">{medico}</span>
-                                <div className="flex gap-4 text-sm">
-                                  <span className="text-purple-600">Solicitadas: <strong>{stats.solicitadas}</strong></span>
-                                  <span className="text-green-600">Cubiertas: <strong>{stats.cubiertas}</strong></span>
-                                  <span className="text-blue-600">Total: <strong>{stats.solicitadas + stats.cubiertas}</strong></span>
-                                </div>
-                              </div>
-                            ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Lista de suplencias */}
-                    <h3 className="font-bold text-lg mb-3">📋 Todas las Suplencias</h3>
                     {loading ? (
-                      <div className="text-center py-12">Cargando...</div>
-                    ) : filtrarSuplencias().length === 0 ? (
+                      <div className="text-center py-12">
+                        <div className="text-4xl mb-4">⏳</div>
+                        <p className="text-gray-600">Cargando suplencias...</p>
+                      </div>
+                    ) : suplencias.length === 0 ? (
                       <div className="text-center py-12 text-gray-500">
-                        <p>No hay suplencias registradas</p>
+                        <div className="text-4xl mb-4">📋</div>
+                        <p className="text-lg">No hay suplencias registradas en el sistema</p>
                       </div>
                     ) : (
-                      <div className="space-y-3 max-h-96 overflow-y-auto">
-                        {filtrarSuplencias().map(s => (
-                          <div key={s.id} className="border-2 rounded-lg p-4 hover:border-purple-300">
-                            <div className="flex justify-between items-start mb-2">
-                              <div>
-                                <span className="bg-purple-100 text-purple-700 px-2 py-1 rounded text-xs font-bold">
-                                  {new Date(s.fecha_suplencia).toLocaleDateString('es-MX')}
-                                </span>
-                                <span className="ml-2 bg-green-100 text-green-700 px-2 py-1 rounded text-xs font-bold">
-                                  {s.estado}
-                                </span>
-                              </div>
-                              <button
-                                onClick={() => eliminarSuplencia(s.id)}
-                                className="text-red-500 hover:bg-red-50 p-2 rounded"
-                              >
-                                🗑️
-                              </button>
+                      <>
+                        <div className="bg-gradient-to-r from-purple-50 to-pink-50 rounded-lg p-6 mb-6 border-2 border-purple-200">
+                          <h3 className="font-bold text-lg mb-4">📈 Estadísticas Generales</h3>
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                            <div className="bg-white rounded-lg p-3">
+                              <p className="text-xs text-gray-600">Total Suplencias</p>
+                              <p className="text-3xl font-bold text-purple-600">{filtrarSuplencias().length}</p>
                             </div>
-                            <div className="grid md:grid-cols-2 gap-4 text-sm">
-                              <div>
-                                <p className="font-bold text-purple-700">Titular:</p>
-                                <p>{s.medico_titular}</p>
-                                <p className="text-gray-600">Turno: {s.turno_titular}</p>
-                              </div>
-                              <div>
-                                <p className="font-bold text-green-700">Suplente:</p>
-                                <p>{s.medico_suplente}</p>
-                                <p className="text-gray-600">Turno: {s.turno_suplente}</p>
-                              </div>
+                            <div className="bg-white rounded-lg p-3">
+                              <p className="text-xs text-gray-600">Médicos Involucrados</p>
+                              <p className="text-3xl font-bold text-blue-600">
+                                {new Set([...filtrarSuplencias().map(s => s.medico_titular), ...filtrarSuplencias().map(s => s.medico_suplente)]).size}
+                              </p>
                             </div>
-                            {s.notas && (
-                              <div className="mt-2 text-sm bg-gray-50 rounded p-2">
-                                <p className="text-gray-600">📝 {s.notas}</p>
-                              </div>
-                            )}
+                            <div className="bg-white rounded-lg p-3">
+                              <p className="text-xs text-gray-600">Este Mes</p>
+                              <p className="text-3xl font-bold text-green-600">
+                                {filtrarSuplencias().filter(s => s.fecha_suplencia.startsWith(new Date().toISOString().slice(0,7))).length}
+                              </p>
+                            </div>
+                            <div className="bg-white rounded-lg p-3">
+                              <p className="text-xs text-gray-600">Activas</p>
+                              <p className="text-3xl font-bold text-orange-600">
+                                {filtrarSuplencias().filter(s => s.estado === 'Activa').length}
+                              </p>
+                            </div>
                           </div>
-                        ))}
-                      </div>
+
+                          <div className="flex gap-3">
+                            <button
+                              onClick={() => exportarExcel()}
+                              className="flex-1 bg-green-500 text-white py-3 rounded-lg font-bold hover:bg-green-600 transition"
+                            >
+                              📥 Exportar Excel
+                            </button>
+                            <button
+                              onClick={generarReporte}
+                              className="flex-1 bg-blue-500 text-white py-3 rounded-lg font-bold hover:bg-blue-600 transition"
+                            >
+                              📊 Generar Reporte TXT
+                            </button>
+                          </div>
+                        </div>
+
+                        {filtrarSuplencias().length > 0 && (
+                          <div className="mb-6">
+                            <h3 className="font-bold text-lg mb-3">🏆 Top Médicos</h3>
+                            <div className="space-y-2">
+                              {Object.entries(calcularEstadisticas(filtrarSuplencias()).medicosStats)
+                                .sort((a,b) => (b[1].solicitadas + b[1].cubiertas) - (a[1].solicitadas + a[1].cubiertas))
+                                .slice(0, 10)
+                                .map(([medico, stats]) => (
+                                  <div key={medico} className="bg-gray-50 rounded-lg p-3 flex justify-between items-center hover:bg-gray-100 transition">
+                                    <span className="font-bold">{medico}</span>
+                                    <div className="flex gap-4 text-sm">
+                                      <span className="text-purple-600">Solicitadas: <strong>{stats.solicitadas}</strong></span>
+                                      <span className="text-green-600">Cubiertas: <strong>{stats.cubiertas}</strong></span>
+                                      <span className="text-blue-600">Total: <strong>{stats.solicitadas + stats.cubiertas}</strong></span>
+                                    </div>
+                                  </div>
+                                ))}
+                            </div>
+                          </div>
+                        )}
+
+                        <h3 className="font-bold text-lg mb-3">📋 Todas las Suplencias ({filtrarSuplencias().length})</h3>
+                        <div className="space-y-3 max-h-96 overflow-y-auto">
+                          {filtrarSuplencias().map(s => (
+                            <div key={s.id} className="border-2 rounded-lg p-4 hover:border-purple-300 transition">
+                              <div className="flex justify-between items-start mb-2">
+                                <div>
+                                  <span className="bg-purple-100 text-purple-700 px-2 py-1 rounded text-xs font-bold mr-2">
+                                    {new Date(s.fecha_suplencia).toLocaleDateString('es-MX')}
+                                  </span>
+                                  <span className="bg-green-100 text-green-700 px-2 py-1 rounded text-xs font-bold">
+                                    {s.estado}
+                                  </span>
+                                </div>
+                                <button
+                                  onClick={() => eliminarSuplencia(s.id)}
+                                  className="text-red-500 hover:bg-red-50 p-2 rounded transition"
+                                  title="Eliminar suplencia"
+                                >
+                                  🗑️
+                                </button>
+                              </div>
+                              <div className="grid md:grid-cols-2 gap-4 text-sm">
+                                <div>
+                                  <p className="font-bold text-purple-700">👨‍⚕️ Titular:</p>
+                                  <p className="font-semibold">{s.medico_titular}</p>
+                                  <p className="text-gray-600">Turno: {s.turno_titular}</p>
+                                </div>
+                                <div>
+                                  <p className="font-bold text-green-700">👤 Suplente:</p>
+                                  <p className="font-semibold">{s.medico_suplente}</p>
+                                  <p className="text-gray-600">Turno: {s.turno_suplente}</p>
+                                </div>
+                              </div>
+                              {s.notas && (
+                                <div className="mt-2 text-sm bg-gray-50 rounded p-2">
+                                  <p className="text-gray-600">📝 {s.notas}</p>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </>
                     )}
                   </div>
                 )}
